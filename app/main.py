@@ -19,6 +19,11 @@ HARD_MAX_DURATION_SECONDS = int(os.getenv("MAX_DURATION_SECONDS", "600"))
 HARD_MAX_DOWNLOAD_BYTES = int(os.getenv("MAX_DOWNLOAD_BYTES", str(120 * 1024 * 1024)))
 HARD_MAX_OGG_BYTES = int(os.getenv("MAX_OGG_BYTES", str(32 * 1024 * 1024)))
 PROCESS_TIMEOUT_SECONDS = int(os.getenv("PROCESS_TIMEOUT_SECONDS", "600"))
+YTDLP_USER_AGENT = os.getenv(
+    "YTDLP_USER_AGENT",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+)
 
 app = FastAPI(title="Custom Songs Converter", version="0.1.0")
 
@@ -111,6 +116,10 @@ def validate_url(raw_url: str) -> None:
 def read_metadata(url: str) -> dict:
     result = run_command([
         "yt-dlp",
+        "--user-agent",
+        YTDLP_USER_AGENT,
+        "--referer",
+        referer_for(url),
         "--dump-single-json",
         "--no-playlist",
         "--skip-download",
@@ -125,6 +134,10 @@ def read_metadata(url: str) -> dict:
 def download_audio(url: str, workdir: Path, max_bytes: int) -> Path:
     run_command([
         "yt-dlp",
+        "--user-agent",
+        YTDLP_USER_AGENT,
+        "--referer",
+        referer_for(url),
         "--no-playlist",
         "--max-filesize",
         str(max_bytes),
@@ -189,6 +202,11 @@ def run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
     if result.returncode != 0:
         raise HTTPException(status_code=400, detail=clean_error(result.stderr or result.stdout))
     return result
+
+
+def referer_for(raw_url: str) -> str:
+    parsed = urlparse(raw_url)
+    return f"{parsed.scheme}://{parsed.netloc}/"
 
 
 def clean_error(value: str) -> str:
