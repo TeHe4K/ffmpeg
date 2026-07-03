@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
@@ -26,6 +27,8 @@ YTDLP_USER_AGENT = os.getenv(
 )
 
 app = FastAPI(title="Custom Songs Converter", version="0.1.0")
+
+DIRECT_AUDIO_EXTENSIONS = (".mp3", ".ogg", ".wav", ".m4a", ".aac", ".flac", ".opus", ".webm")
 
 
 class ConvertRequest(BaseModel):
@@ -48,12 +51,16 @@ def convert(request: ConvertRequest, x_api_key: str | None = Header(default=None
 
     workdir = Path(tempfile.mkdtemp(prefix="customsongs-"))
     try:
-        metadata = read_metadata(request.url)
+        metadata = {}
+        input_file = try_download_direct_audio(request.url, workdir, request.max_download_bytes)
+        if input_file is None:
+            metadata = read_metadata(request.url)
         duration = float(metadata.get("duration") or 0)
         if duration and duration > request.max_duration_seconds:
             raise HTTPException(status_code=413, detail=f"Трек слишком длинный: {round(duration)} сек.")
 
-        input_file = download_audio(request.url, workdir, request.max_download_bytes)
+        if input_file is None:
+            input_file = download_audio(request.url, workdir, request.max_download_bytes)
         if not duration:
             duration = probe_duration(input_file)
         if duration > request.max_duration_seconds:
@@ -154,6 +161,41 @@ def download_audio(url: str, workdir: Path, max_bytes: int) -> Path:
     if input_file.stat().st_size > max_bytes:
         raise HTTPException(status_code=413, detail="Скачанный файл слишком большой.")
     return input_file
+
+
+def try_download_direct_audio(url: str, workdir: Path, max_bytes: int) -> Path | None:
+    parsed = urlparse(url)
+    looks_like_audio = parsed.path.lower().endswith(DIRECT_AUDIO_EXTENSIONS)
+    request = Request(
+        url,
+        headers={
+            "User-Agent": YTDLP_USER_AGENT,
+            "Referer": referer_for(url),
+            "Accept": "audio/*,*/*;q=0.8",
+        },
+    )
+    try:
+        with urlopen(request, timeout=30) as response:
+            content_type = response.headers.get("content-type", "").lower()
+            if not looks_like_audio and not content_type.startswith("audio/"):
+                return None
+            suffix = Path(parsed.path).suffix or ".bin"
+            output = workdir / f"input{suffix}"
+            total = 0
+            with output.open("wb") as file:
+                while True:
+                    chunk = response.read(8192)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise HTTPException(status_code=413, detail="Скачанный файл слишком большой.")
+                    file.write(chunk)
+            return output
+    except HTTPException:
+        raise
+    except Exception:
+        return None
 
 
 def probe_duration(input_file: Path) -> float:
