@@ -226,6 +226,8 @@ def convert_to_ogg(input_file: Path, output_file: Path) -> None:
         "-vn",
         "-map_metadata",
         "-1",
+        "-ac",
+        "1",
         "-acodec",
         "libvorbis",
         "-q:a",
