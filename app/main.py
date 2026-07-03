@@ -194,7 +194,9 @@ def try_download_direct_audio(url: str, workdir: Path, max_bytes: int) -> Path |
             return output
     except HTTPException:
         raise
-    except Exception:
+    except Exception as exc:
+        if looks_like_audio:
+            raise HTTPException(status_code=400, detail=f"Прямая аудиоссылка недоступна для converter-сервера: {clean_error(str(exc))}")
         return None
 
 
